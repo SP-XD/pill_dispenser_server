@@ -16,16 +16,17 @@ def publish_command(device_id, command_str):
 '''
 Schedule format: 
 
+# maintain one medicine per schedule
 new_schedule = [
     {
         "time": "08:00",
-        "dispenser_modules": ["module1", "module2"],
+        "dispenser_modules": ["module1"], # module1 == medicine 1
         "days": ["Mon", "Wed", "Fri"],
         "until_date": "2025-07-01"
     },
     {
         "time": "20:00",
-        "dispenser_modules": ["module2"],
+        "dispenser_modules": ["module2"], # module2 == medicine 2
         "days": ["daily"]
     }
 ]

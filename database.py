@@ -51,33 +51,21 @@ def init_db():
         )
     ''')
 
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS dispenser_module (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            patient_id INTEGER,
-            module_name TEXT,
-            pills_left INTEGER,
-            threshold INTEGER DEFAULT 2,
-            pending BOOLEAN DEFAULT 0,
-            FOREIGN KEY (patient_id) REFERENCES patient(id)
-        )
-    ''')
-    
-    # Schedule
+    # Schedule per medicine 
     c.execute('''
         CREATE TABLE IF NOT EXISTS schedule (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             patient_id INTEGER,
             dispenser_module_id INTEGER,
-            time TEXT,
-            repeat_type TEXT CHECK(repeat_type IN ('daily', 'alternate', 'weekly')) DEFAULT 'daily',
+            medicine_name TEXT NOT NULL,  -- Added medicine name
+            time TEXT, -- HH:MM
+            repeat_type TEXT CHECK(repeat_type IN ('daily', 'custom')) DEFAULT 'daily',
             days_of_week TEXT,  -- e.g., "mon,wed,fri"
             until_date TEXT,    -- optional, format: "YYYY-MM-DD"
             FOREIGN KEY (patient_id) REFERENCES patient(id),
             FOREIGN KEY (dispenser_module_id) REFERENCES dispenser_module(id)
         )
     ''')
-
 
     # Event Log
     c.execute('''
@@ -111,6 +99,7 @@ def log_event(dispenser_module_name, message):
 
 def get_logs(limit=50):
     conn = sqlite3.connect(DATABASE_FILE)
+    conn.row_factory = sqlite3.Row
     c = conn.cursor()
     c.execute("""
         SELECT logs.id, timestamp, module_name, message
