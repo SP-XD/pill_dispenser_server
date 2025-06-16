@@ -1,3 +1,4 @@
+from api_server import start_api
 from mqtt_handler import start_mqtt_listener
 from database import init_db
 from mqtt_publisher import (
@@ -14,7 +15,7 @@ if __name__ == "__main__":
     print("Starting Pill Server...")
     init_db()
     start_mqtt_listener()
-    # start_api()  
+    start_api()  
     
     # time.sleep(10)
    

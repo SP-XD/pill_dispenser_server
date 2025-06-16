@@ -1,2 +1,3 @@
 .venv
 pill_data.db
+__pycache__

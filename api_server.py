@@ -25,7 +25,7 @@ def close_db(e=None):
         db.close()
 
 def start_api():
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=4000)
 
 # Doctor endpoints
 """
@@ -121,7 +121,11 @@ def get_doctor_by_id(doctor_id):
     return jsonify(result)
 
 """
-GET /api/doctors/email/{email}
+POST /api/doctors/search_by_email
+Request:
+{
+    "email": "smith@hospital.com"
+}
 Response: 
 {
     "id": 1,
@@ -130,10 +134,16 @@ Response:
     "patient_count": 10
 }
 """
-@app.route('/api/doctors/email/<email>', methods=['GET'])
-def get_doctor_by_email(email):
+@app.route('/api/doctors/search_by_email', methods=['POST'])
+def get_doctor_by_email():
+    data = request.get_json()
+    if not data or 'email' not in data:
+        return jsonify({'error': 'Name required'}), 400
+
     db = get_db()
     c = db.cursor()
+    
+    email= data.get("email")
     
     # Get doctor info
     c.execute('''
@@ -174,16 +184,22 @@ def create_patient():
     data = request.get_json()
     if not data or 'name' not in data:
         return jsonify({'error': 'Name required'}), 400
-    
+
     db = get_db()
     c = db.cursor()
     try:
+        doctor_id = data.get('doctor_id')
+        if doctor_id is not None:
+            c.execute('SELECT id FROM doctor WHERE id = ?', (doctor_id,))
+            if not c.fetchone():
+                return jsonify({'error': 'Invalid doctor_id'}), 400
+
         c.execute('''
             INSERT INTO patient (name, age, doctor_id, notes) 
             VALUES (?, ?, ?, ?)
         ''', (data['name'], 
               data.get('age'), 
-              data.get('doctor_id'),
+              doctor_id,
               data.get('notes')))
         db.commit()
         return jsonify({'id': c.lastrowid, 'status': 'success'}), 201
@@ -193,13 +209,13 @@ def create_patient():
         return jsonify({'error': str(e)}), 500
 
 """
-PUT /api/patients/{patient_id}/assign_doctor
+POST /api/patients/{patient_id}/assign_doctor
 Request format:
 {
     "doctor_id": 1
 }
 """
-@app.route('/api/patients/<int:patient_id>/assign_doctor', methods=['PUT'])
+@app.route('/api/patients/<int:patient_id>/assign_doctor', methods=['POST'])
 def assign_doctor(patient_id):
     data = request.get_json()
     if not data or 'doctor_id' not in data:
@@ -486,22 +502,9 @@ def create_schedule(patient_id):
         
     except Exception as e:
         db.rollback()
+        print("Error at create schedule: ", e)
         return jsonify({'error': str(e)}), 500
     
-@app.route('/api/devices/<device_id>/schedule', methods=['POST'])
-def update_schedule():
-    data = request.get_json()
-    if not data or 'dispenser_modules' not in data:
-        return jsonify({'error': 'Missing schedule data'}), 400
-    
-    device_id = data.get('device_id')
-    schedule = data.get('schedule')
-    
-    try:
-        publish_schedule(device_id, schedule)
-        return jsonify({'status': 'success', 'message': 'Schedule updated'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 # Device control endpoints
 """
@@ -728,3 +731,278 @@ def get_device_status(patient_id):
     
     return jsonify(device_status)
 
+"""
+POST /api/patients/{patient_id}/assign_device
+Request format:
+{
+    "serial_number": "PD001"
+}
+Response:
+{
+    "status": "success",
+    "device": {
+        "id": 1,
+        "serial_number": "PD001"
+    }
+}
+"""
+@app.route('/api/patients/<int:patient_id>/assign_device', methods=['POST'])
+def assign_device(patient_id):
+    data = request.get_json()
+    if not data or 'serial_number' not in data:
+        return jsonify({'error': 'serial_number required'}), 400
+
+    db = get_db()
+    c = db.cursor()
+    try:
+        # Check if patient exists
+        c.execute('SELECT id FROM patient WHERE id = ?', (patient_id,))
+        if not c.fetchone():
+            return jsonify({'error': 'Patient not found'}), 404
+
+        # ! currently only device is there, so no need to check already assigned
+        # ! in case its already assigned it will be reassigned to another patient 
+        # ! for testing
+        # # Check if device is already assigned
+        # c.execute('SELECT id FROM pill_dispenser WHERE serial_number = ?', (data['serial_number'],))
+        # if c.fetchone():
+        #     return jsonify({'error': 'Device already assigned to another patient'}), 409
+
+        # # Create pill dispenser entry
+        # c.execute('''
+        #     INSERT INTO pill_dispenser (patient_id, serial_number)
+        #     VALUES (?, ?)
+        # ''', (patient_id, data['serial_number']))
+        
+        # dispenser_id = c.lastrowid
+        
+        # Get pill dispenser by serial number
+        c.execute('SELECT id FROM pill_dispenser WHERE serial_number = ?', (data['serial_number'],))
+        dispenser = c.fetchone()
+        if not dispenser:
+            return jsonify({'error': 'Device not found'}), 404
+
+        dispenser_id = dispenser['id']
+
+        # Assign patient_id to the dispenser
+        c.execute('UPDATE pill_dispenser SET patient_id = ? WHERE id = ?', (patient_id, dispenser_id))
+        if c.rowcount == 0:
+            return jsonify({'error': 'Failed to assign device to patient'}), 500
+
+        # Create default modules (two per dispenser)
+        c.execute('''
+            INSERT INTO dispenser_module (pill_dispenser_id, module_name, pills_left, threshold)
+            VALUES 
+                (?, 'module1', 0, 5),
+                (?, 'module2', 0, 5)
+        ''', (dispenser_id, dispenser_id))
+
+        db.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'device': {
+                'id': dispenser_id,
+                'serial_number': data['serial_number']
+            }
+        }), 201
+        
+    except sqlite3.IntegrityError:
+        db.rollback()
+        return jsonify({'error': 'Patient already has a device assigned'}), 409
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500
+
+"""
+PUT /api/schedules/{schedule_id}
+Request format:
+{
+    "time": "08:00",
+    "module": "module1",
+    "medicine_name": "Aspirin",
+    "days": ["mon", "wed", "fri"],
+    "repeat_type": "custom",
+    "until_date": "2025-07-01"
+}
+Response:
+{
+    "status": "success",
+    "schedule": {
+        "id": 1,
+        "time": "08:00",
+        ...
+    }
+}
+"""
+@app.route('/api/schedules/<int:schedule_id>', methods=['PUT'])
+def update_schedule(schedule_id):
+    import traceback
+    import sys
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    db = get_db()
+    c = db.cursor()
+    
+    try:
+        # First get the existing schedule to verify it exists and get patient_id
+        c.execute('''
+            SELECT s.*, dm.module_name, pd.serial_number 
+            FROM schedule s
+            JOIN dispenser_module dm ON s.dispenser_module_id = dm.id
+            JOIN pill_dispenser pd ON dm.pill_dispenser_id = pd.id
+            WHERE s.id = ?
+        ''', (schedule_id,))
+ 
+        existing = c.fetchone()
+        if not existing:
+            return jsonify({'error': 'Schedule not found'}), 404
+
+        # If module is being changed, verify new module exists
+        if 'module' in data:
+            c.execute('''
+                SELECT dm.id 
+                FROM dispenser_module dm
+                JOIN pill_dispenser pd ON dm.pill_dispenser_id = pd.id
+                WHERE pd.patient_id = ? AND dm.module_name = ?
+            ''', (existing['patient_id'], data['module']))
+            
+            module = c.fetchone()
+            if not module:
+                return jsonify({'error': 'Invalid module name'}), 400
+            module_id = module['id']
+        else:
+            module_id = existing['dispenser_module_id']
+
+        # Update the schedule
+        c.execute('''
+            UPDATE schedule 
+            SET time = ?,
+                medicine_name = ?,
+                repeat_type = ?,
+                days_of_week = ?,
+                until_date = ?,
+                dispenser_module_id = ?
+            WHERE id = ?
+        ''', (
+            data.get('time', existing['time']),
+            data.get('medicine_name', existing['medicine_name']),
+            data.get('repeat_type', existing['repeat_type']),
+            ','.join(data.get('days', existing['days_of_week'].split(','))),
+            data.get('until_date', existing['until_date']),
+            module_id,
+            schedule_id
+        ))
+
+        # Get all schedules for this patient to republish
+        c.execute('''
+            SELECT s.*, dm.module_name
+            FROM schedule s
+            JOIN dispenser_module dm ON s.dispenser_module_id = dm.id
+            JOIN pill_dispenser pd ON dm.pill_dispenser_id = pd.id
+            WHERE s.patient_id = ?
+        ''', (existing['patient_id'],))
+
+        schedules = [{
+            'id': row['id'],
+            'time': row['time'],
+            'module': row['module_name'],
+            'days': row['days_of_week'].split(',') if row['days_of_week'] else [],
+            'until_date': row['until_date']
+        } for row in c.fetchall()]
+
+        db.commit()
+
+        # Republish entire schedule via MQTT
+        mqtt_schedule = transform_schedule_for_mqtt(schedules)
+        publish_schedule(existing['serial_number'], mqtt_schedule)
+
+        return jsonify({
+            'status': 'success',
+            'schedule': {
+                'id': schedule_id,
+                'time': data.get('time', existing['time']),
+                'module': data.get('module', existing['module_name']),
+                'medicine_name': data.get('medicine_name', existing['medicine_name']),
+                'repeat_type': data.get('repeat_type', existing['repeat_type']),
+                'days': data.get('days', existing['days_of_week'].split(',')),
+                'until_date': data.get('until_date', existing['until_date'])
+            }
+        })
+
+    except Exception as e:
+        db.rollback()
+        print("error @update_schedule: ", e )
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        tb = traceback.extract_tb(exc_traceback)
+        for line in tb:
+            print(f'File "{line.filename}", line {line.lineno}, in {line.name}')
+        print(f'  {line.line}')
+        return jsonify({'error': str(e)}), 500
+
+"""
+DELETE /api/schedules/{schedule_id}
+Response:
+{
+    "status": "success",
+    "message": "Schedule deleted successfully"
+}
+"""
+@app.route('/api/schedules/<int:schedule_id>', methods=['DELETE'])
+def delete_schedule(schedule_id):
+    db = get_db()
+    c = db.cursor()
+    
+    try:
+        # First get the schedule details to get patient_id and device info
+        c.execute('''
+            SELECT s.patient_id, pd.serial_number 
+            FROM schedule s
+            JOIN dispenser_module dm ON s.dispenser_module_id = dm.id
+            JOIN pill_dispenser pd ON dm.pill_dispenser_id = pd.id
+            WHERE s.id = ?
+        ''', (schedule_id,))
+        
+        schedule = c.fetchone()
+        if not schedule:
+            return jsonify({'error': 'Schedule not found'}), 404
+
+        # Delete the schedule
+        c.execute('DELETE FROM schedule WHERE id = ?', (schedule_id,))
+        
+        # Get remaining schedules for this patient to republish
+        c.execute('''
+            SELECT s.*, dm.module_name
+            FROM schedule s
+            JOIN dispenser_module dm ON s.dispenser_module_id = dm.id
+            WHERE s.patient_id = ?
+        ''', (schedule['patient_id'],))
+
+        schedules = [{
+            'time': row['time'],
+            'module': row['module_name'],
+            'days': row['days_of_week'].split(',') if row['days_of_week'] else [],
+            'until_date': row['until_date']
+        } for row in c.fetchall()]
+
+        db.commit()
+
+        # Republish updated schedule via MQTT
+        if schedules:
+            mqtt_schedule = transform_schedule_for_mqtt(schedules)
+            publish_schedule(schedule['serial_number'], mqtt_schedule)
+        else:
+            # If no schedules left, send empty schedule
+            publish_schedule(schedule['serial_number'], [])
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Schedule deleted successfully'
+        })
+
+    except Exception as e:
+        db.rollback()
+        return jsonify({'error': str(e)}), 500

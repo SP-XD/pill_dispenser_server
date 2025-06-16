@@ -1,13 +1,13 @@
 import paho.mqtt.client as mqtt
-from config import MQTT_BROKER, MQTT_PORT, DEVICE_TOPIC
+from config import MQTT_BROKER, MQTT_PORT, DEVICE_TOPIC_WITH_HARDCODED_DEVICE_ID
 from database import log_event
 from notifier import send_notification
 
 # Derived topics
-STATUS_TOPIC = f"{DEVICE_TOPIC}/status"
-SCHEDULE_STATUS_TOPIC = f"{DEVICE_TOPIC}/schedule/status"
-SETTINGS_STATUS_TOPIC = f"{DEVICE_TOPIC}/settings/status"
-ALERTS_TOPIC = f"{DEVICE_TOPIC}/alerts"
+STATUS_TOPIC = f"{DEVICE_TOPIC_WITH_HARDCODED_DEVICE_ID}/status"
+SCHEDULE_STATUS_TOPIC = f"{DEVICE_TOPIC_WITH_HARDCODED_DEVICE_ID}/schedule/status"
+SETTINGS_STATUS_TOPIC = f"{DEVICE_TOPIC_WITH_HARDCODED_DEVICE_ID}/settings/status"
+ALERTS_TOPIC = f"{DEVICE_TOPIC_WITH_HARDCODED_DEVICE_ID}/alerts"
 
 def on_connect(client, userdata, flags, rc):
     print("✅ Connected to MQTT Broker with result code:", rc)
