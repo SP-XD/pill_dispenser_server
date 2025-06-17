@@ -317,16 +317,17 @@ Response:
     },
     "device": {
         "id": 1,
-        "serial_number": "SN123456"
+        "serial_number": "SN123456",
+        "modules": [
+            {
+                "module": "module1",
+                "pills_left": 10,
+                "threshold": 5,
+                "pending": false
+            }
+        ]
     },
-    "modules": [
-        {
-            "module": "module1",
-            "pills_left": 10,
-            "threshold": 5,
-            "pending": false
-        }
-    ]
+   
 }
 """
 @app.route('/api/patients/<int:patient_id>', methods=['GET'])
@@ -363,14 +364,15 @@ def get_patient_details_by_id(patient_id):
         },
         'device': {
             'id': first_row['dispenser_id'],
-            'serial_number': first_row['serial_number']
+            'serial_number': first_row['serial_number'],
+            'modules': [{
+                'module': row['module_name'],
+                'pills_left': row['pills_left'],
+                'threshold': row['threshold'],
+                'pending': bool(row['pending'])
+            } for row in rows if row['module_name']],
         } if first_row['dispenser_id'] else None,
-        'modules': [{
-            'module': row['module_name'],
-            'pills_left': row['pills_left'],
-            'threshold': row['threshold'],
-            'pending': bool(row['pending'])
-        } for row in rows if row['module_name']]
+       
     }
     
     return jsonify(result)
@@ -546,8 +548,7 @@ def trigger_dispense(device_id):
         # Update pills count and set pending
         c.execute('''
             UPDATE dispenser_module 
-            SET pills_left = pills_left - 1,
-                pending = 1
+            SET pills_left = pills_left - 1
             WHERE id = ?
         ''', (module['id'],))
         
@@ -789,13 +790,14 @@ def assign_device(patient_id):
         if c.rowcount == 0:
             return jsonify({'error': 'Failed to assign device to patient'}), 500
 
-        # Create default modules (two per dispenser)
-        c.execute('''
-            INSERT INTO dispenser_module (pill_dispenser_id, module_name, pills_left, threshold)
-            VALUES 
-                (?, 'module1', 0, 5),
-                (?, 'module2', 0, 5)
-        ''', (dispenser_id, dispenser_id))
+        # !not needed as only one device there and its getting reassigned to other people
+        # # Create default modules (two per dispenser)
+        # c.execute('''
+        #     INSERT INTO dispenser_module (pill_dispenser_id, module_name, pills_left, threshold)
+        #     VALUES 
+        #         (?, 'module1', 0, 5),
+        #         (?, 'module2', 0, 5)
+        # ''', (dispenser_id, dispenser_id))
 
         db.commit()
         
@@ -1006,3 +1008,6 @@ def delete_schedule(schedule_id):
     except Exception as e:
         db.rollback()
         return jsonify({'error': str(e)}), 500
+
+
+# ! hardmode endpoint left
